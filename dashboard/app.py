@@ -10,10 +10,17 @@ import plotly.graph_objects as go
 import sys
 import os
 
-# ── Path setup ──────────────────────────────────────────────────────────────
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+# ── Path setup — must come before ALL src.* imports ─────────────────────────
+# Resolve the project root (parent of dashboard/) regardless of CWD.
+# This is critical for Streamlit Cloud, where the working directory
+# may be the repo root OR the dashboard/ directory.
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))          # …/dashboard
+PROJECT_ROOT = os.path.abspath(os.path.join(_THIS_DIR, '..'))   # …/project-root
+
+for _p in [PROJECT_ROOT, _THIS_DIR]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 
 from src.data_preprocessing import preprocess_pipeline
 from src.analysis import analyze_purchases, customer_behaviour_metrics
@@ -157,33 +164,80 @@ if page == "🏠 Dashboard":
     st.markdown("<br>", unsafe_allow_html=True)
     col_a, col_b = st.columns(2)
     with col_a:
-        cat_rev = df.groupby('Product Category', as_index=False)['Total Amount'].sum()
-        fig = px.bar(cat_rev, x='Product Category', y='Total Amount',
-                     color='Product Category', text_auto='.2s',
-                     template='plotly_dark', title='Revenue by Category')
+        _cat = df.groupby('Product Category')['Total Amount'].sum().sort_values(ascending=False)
+        _cat_labels = list(_cat.index.astype(str))
+        _cat_values = [float(v) for v in _cat.values]
+        fig = go.Figure(go.Bar(
+            x=_cat_labels, y=_cat_values,
+            text=[f"${v:,.0f}" for v in _cat_values],
+            textposition='auto',
+            marker_color=px.colors.qualitative.Plotly[:len(_cat_labels)],
+        ))
+        fig.update_layout(
+            title='Revenue by Category',
+            xaxis_title='Product Category',
+            yaxis_title='Total Revenue ($)',
+            template='plotly_dark',
+            showlegend=False,
+            yaxis=dict(range=[0, max(_cat_values) * 1.15]),
+        )
         st.plotly_chart(fig, use_container_width=True)
+
     with col_b:
-        monthly = monthly_trend(df)
-        fig2 = px.line(monthly, x='YearMonth', y='Monthly_Revenue',
-                       markers=True, template='plotly_dark',
-                       title='Monthly Revenue Trend')
+        _monthly = monthly_trend(df)
+        _m_labels = list(_monthly['YearMonth'].astype(str))
+        _m_values = [float(v) for v in _monthly['Monthly_Revenue'].values]
+        fig2 = go.Figure(go.Scatter(
+            x=_m_labels, y=_m_values,
+            mode='lines+markers',
+            line=dict(color='#636EFA', width=2),
+            marker=dict(size=7),
+            text=[f"${v:,.0f}" for v in _m_values],
+            hovertemplate='%{x}<br>Revenue: $%{y:,.0f}<extra></extra>',
+        ))
+        fig2.update_layout(
+            title='Monthly Revenue Trend',
+            xaxis_title='Month',
+            yaxis_title='Revenue ($)',
+            template='plotly_dark',
+            yaxis=dict(range=[0, max(_m_values) * 1.15]),
+        )
         st.plotly_chart(fig2, use_container_width=True)
 
     col_c, col_d = st.columns(2)
     with col_c:
-        gender_rev = df.groupby('Gender', as_index=False)['Total Amount'].sum()
-        fig3 = px.pie(gender_rev, names='Gender', values='Total Amount',
-                      hole=0.4, template='plotly_dark',
-                      color_discrete_sequence=px.colors.qualitative.Pastel,
-                      title='Revenue by Gender')
+        _grev = df.groupby('Gender')['Total Amount'].sum()
+        _g_labels = list(_grev.index.astype(str))
+        _g_values = [float(v) for v in _grev.values]
+        fig3 = go.Figure(go.Pie(
+            labels=_g_labels,
+            values=_g_values,
+            hole=0.4,
+            textinfo='label+percent',
+            hovertemplate='%{label}<br>Revenue: $%{value:,.0f}<br>%{percent}<extra></extra>',
+        ))
+        fig3.update_layout(
+            title='Revenue by Gender',
+            template='plotly_dark',
+        )
         st.plotly_chart(fig3, use_container_width=True)
+
     with col_d:
         if not rfm_df.empty and 'Customer Segment' in rfm_df.columns:
-            seg_cnt = rfm_df['Customer Segment'].value_counts().reset_index()
-            seg_cnt.columns = ['Segment', 'Count']
-            fig4 = px.pie(seg_cnt, names='Segment', values='Count',
-                          hole=0.4, template='plotly_dark',
-                          title='Customer Segment Distribution')
+            _seg = rfm_df['Customer Segment'].value_counts()
+            _seg_labels = list(_seg.index.astype(str))
+            _seg_counts = [int(v) for v in _seg.values]
+            fig4 = go.Figure(go.Pie(
+                labels=_seg_labels,
+                values=_seg_counts,
+                hole=0.4,
+                textinfo='label+percent',
+                hovertemplate='%{label}<br>Customers: %{value}<br>%{percent}<extra></extra>',
+            ))
+            fig4.update_layout(
+                title='Customer Segment Distribution',
+                template='plotly_dark',
+            )
             st.plotly_chart(fig4, use_container_width=True)
 
     # Quick insights
@@ -270,7 +324,7 @@ elif page == "📊 Customer Behaviour":
         with ca1:
             cat_r = fdf.groupby('Product Category', as_index=False)['Total Amount'].sum()
             fig = px.bar(cat_r, x='Product Category', y='Total Amount',
-                         color='Product Category', text_auto='.2s',
+                         color='Product Category', text_auto='$.0f',
                          template='plotly_dark', title='Revenue by Category')
             st.plotly_chart(fig, use_container_width=True)
         with ca2:
@@ -320,6 +374,7 @@ elif page == "📊 Customer Behaviour":
             fig = px.line(mon, x='YearMonth', y='Monthly_Revenue',
                           markers=True, template='plotly_dark',
                           title='Monthly Revenue Trend')
+            fig.update_layout(yaxis=dict(tickformat="$,.0f"))
             st.plotly_chart(fig, use_container_width=True)
         with ct2:
             fig = px.bar(mon, x='YearMonth', y='Monthly_Orders',
@@ -330,6 +385,7 @@ elif page == "📊 Customer Behaviour":
         fig = px.line(cat_mon, x='YearMonth', y='Revenue',
                       color='Product Category', markers=True,
                       template='plotly_dark', title='Category-wise Monthly Revenue')
+        fig.update_layout(yaxis=dict(tickformat="$,.0f"))
         st.plotly_chart(fig, use_container_width=True)
 
 
@@ -357,7 +413,7 @@ elif page == "👥 Customer Segmentation":
         st.plotly_chart(fig, use_container_width=True)
     with ov2:
         fig = px.bar(seg_stats, x='Customer Segment', y='Total_Revenue',
-                     color='Customer Segment', text_auto='.2s',
+                     color='Customer Segment', text_auto='$.0f',
                      template='plotly_dark', title='Revenue per Segment')
         st.plotly_chart(fig, use_container_width=True)
 
@@ -425,7 +481,7 @@ elif page == "🛒 Purchase Patterns":
     pp1, pp2 = st.columns(2)
     with pp1:
         fig = px.bar(cat_sum, x='Product Category', y='Total_Revenue',
-                     color='Product Category', text_auto='.2s',
+                     color='Product Category', text_auto='$.0f',
                      template='plotly_dark', title='Revenue by Category')
         st.plotly_chart(fig, use_container_width=True)
     with pp2:
@@ -549,6 +605,7 @@ Accuracy depends on data volume and seasonality.
     daily = daily_trend(df)
     fig = px.line(daily, x='Date', y='Daily_Revenue', template='plotly_dark',
                   title='Daily Revenue')
+    fig.update_layout(yaxis=dict(tickformat="$,.0f"))
     st.plotly_chart(fig, use_container_width=True)
 
     # Category-wise monthly
@@ -557,6 +614,7 @@ Accuracy depends on data volume and seasonality.
     fig = px.line(cat_mon, x='YearMonth', y='Revenue',
                   color='Product Category', markers=True,
                   template='plotly_dark', title='Category Monthly Revenue Trend')
+    fig.update_layout(yaxis=dict(tickformat="$,.0f"))
     st.plotly_chart(fig, use_container_width=True)
 
 
