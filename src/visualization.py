@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 import matplotlib.pyplot as plt
 import seaborn as plt_sns
 import seaborn as sns
