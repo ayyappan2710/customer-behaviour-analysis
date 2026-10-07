@@ -1,174 +1,221 @@
-"""
-recommendations.py — Business insights + personalised category recommendations.
-
-Personalised logic (category-level, no individual product data):
-  Score = 0.4 × customer's own purchase frequency for that category
-        + 0.3 × how popular the category is among customers in the same segment
-        + 0.3 × normalised revenue rank of the category globally
-
-All scores are normalised 0-100.  Recommendations exclude the customer's
-single most-purchased category (they already know about it) unless it also
-ranks highly in the segment/global mix.
-"""
-import pandas as pd
-import numpy as np
-from src.utils import safe_empty
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Business insights (kept from original, slightly extended)
-# ──────────────────────────────────────────────────────────────────────────────
-
-def generate_insights(df, customer_summary):
-    """Generate business recommendations based on dynamic data."""
+def generate_category_insights(category_sales):
+    """Generate insights based on product category performance."""
     insights = []
 
-    if safe_empty(df) or safe_empty(customer_summary):
-        return ["Not enough data to generate insights."]
+    if not category_sales:
+        return insights
 
-    # 1. Product Category insights
-    category_sales = df.groupby('Product Category')['Total Amount'].sum().sort_values(ascending=False)
-    if not category_sales.empty:
-        top_cat = category_sales.index[0]
-        bot_cat = category_sales.index[-1]
-        insights.append({
-            'type': 'Top Category',
-            'insight': f"'{top_cat}' is the highest-revenue category (${category_sales.iloc[0]:,.2f}).",
-            'recommendation': "Increase inventory and run targeted ads for this category."
-        })
-        insights.append({
-            'type': 'Underperforming Category',
-            'insight': f"'{bot_cat}' generates the least revenue (${category_sales.iloc[-1]:,.2f}).",
-            'recommendation': "Consider promotional discounts or review its pricing strategy."
-        })
+    highest_cat = max(category_sales, key=category_sales.get)
+    lowest_cat = min(category_sales, key=category_sales.get)
 
-    # 2. Customer Segmentation
-    if 'Customer Segment' in customer_summary.columns:
-        high_val = customer_summary[customer_summary['Customer Segment'].str.contains('High|VIP', case=False, na=False)]
-        if not high_val.empty:
-            avg_hv = high_val['Total_Spending'].mean()
+    insights.append({
+        'type': 'Category Insight',
+        'finding': f"'{highest_cat}' is the most popular category generating the highest revenue.",
+        'recommendation': f"Ensure sufficient stock for '{highest_cat}' and consider expanding this product line."
+    })
+
+    insights.append({
+        'type': 'Category Insight',
+        'finding': f"'{lowest_cat}' has the lowest sales performance.",
+        'recommendation': f"Investigate pricing or marketing for '{lowest_cat}'. Consider promotional bundles to boost its sales."
+    })
+
+    return insights
+
+def generate_segment_insights(df_clustered):
+    """Generate insights based on customer segments."""
+    insights = []
+
+    if df_clustered is None or 'Customer_Segment' not in df_clustered.columns:
+        return insights
+
+    segment_counts = df_clustered['Customer_Segment'].value_counts()
+
+    for segment in segment_counts.index:
+        count = segment_counts[segment]
+        pct = (count / len(df_clustered)) * 100
+
+        if 'High-Value' in segment:
             insights.append({
-                'type': 'High-Value Customers',
-                'insight': f"High-Value customers average ${avg_hv:,.2f} in total spending.",
-                'recommendation': "Launch a loyalty programme with exclusive perks to retain these customers."
+                'type': 'Segment Strategy',
+                'finding': f"{pct:.1f}% of customers are in the '{segment}' segment.",
+                'recommendation': "Implement a VIP loyalty program to retain these high-spending customers. Offer exclusive early access to new products."
+            })
+        elif 'Occasional' in segment or 'Low-Value' in segment:
+            insights.append({
+                'type': 'Segment Strategy',
+                'finding': f"{pct:.1f}% of customers are in the '{segment}' segment.",
+                'recommendation': "Send targeted re-engagement campaigns with discount codes to increase their purchase frequency."
+            })
+        elif 'Regular' in segment or 'Medium' in segment:
+             insights.append({
+                'type': 'Segment Strategy',
+                'finding': f"{pct:.1f}% of customers are in the '{segment}' segment.",
+                'recommendation': "Use cross-selling techniques and personalized recommendations to increase their average order value."
             })
 
-    # 3. Age Group
+    return insights
+
+def generate_demographic_insights(df):
+    """Generate insights based on demographics."""
+    insights = []
+
+    # Age insights
     if 'Age Group' in df.columns:
-        age_sales = df.groupby('Age Group', observed=True)['Total Amount'].sum().sort_values(ascending=False)
-        if not age_sales.empty:
-            top_age = age_sales.index[0]
-            insights.append({
-                'type': 'Top Age Segment',
-                'insight': f"The '{top_age}' age group contributes the most to total sales.",
-                'recommendation': "Tailor marketing creatives and product recommendations for this demographic."
-            })
-
-    # 4. Payment method
-    if 'Payment Method' in df.columns:
-        pay = df['Payment Method'].value_counts()
-        top_pay = pay.index[0]
+        age_sales = df.groupby('Age Group')['Total Amount'].sum()
+        top_age = age_sales.idxmax()
         insights.append({
-            'type': 'Payment Preference',
-            'insight': f"'{top_pay}' is the most preferred payment method ({pay.iloc[0]:,} transactions).",
-            'recommendation': "Ensure zero downtime for this payment channel and offer exclusive cashback."
+            'type': 'Demographic Insight',
+            'finding': f"The '{top_age}' age group contributes the most to total sales.",
+            'recommendation': f"Tailor marketing messages and preferred ad platforms to target the '{top_age}' demographic effectively."
+        })
+
+    # Payment method insights
+    if 'Payment Method' in df.columns:
+        top_payment = df['Payment Method'].value_counts().idxmax()
+        insights.append({
+            'type': 'Payment Insight',
+            'finding': f"'{top_payment}' is the most widely used payment method.",
+            'recommendation': f"Ensure the '{top_payment}' gateway is always optimized for seamless checkout experiences."
         })
 
     return insights
 
+def get_all_recommendations(df_clean, df_clustered, category_sales):
+    """Aggregate all insights and recommendations."""
+    all_insights = []
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Personalised recommendations
-# ──────────────────────────────────────────────────────────────────────────────
+    all_insights.extend(generate_category_insights(category_sales))
+    all_insights.extend(generate_demographic_insights(df_clean))
+    all_insights.extend(generate_segment_insights(df_clustered))
 
-def personalised_recommendations(
-    customer_id: str,
-    df: pd.DataFrame,
-    customer_summary: pd.DataFrame,
-    top_n: int = 4,
-) -> pd.DataFrame:
-    """
-    Return a ranked DataFrame of category recommendations for one customer.
+    return all_insights
 
-    Columns: Category | Score (0-100) | Reason
-    """
-    if safe_empty(df):
-        return pd.DataFrame(columns=['Category', 'Score', 'Reason'])
+import pandas as pd
 
-    # ── Customer's own purchase frequency per category ──
-    cust_df = df[df['Customer ID'] == customer_id]
-    if cust_df.empty:
-        return pd.DataFrame(columns=['Category', 'Score', 'Reason'])
+CANDIDATE_PRODUCTS = {
+    'Electronics': ['Laptop Bag', 'USB Hub', 'Wireless Headphones', 'Webcam', 'Cooling Pad', 'Smartphone Stand', 'Portable Charger'],
+    'Clothing': ['T-Shirt', 'Jeans', 'Jacket', 'Sneakers', 'Socks', 'Hat', 'Scarf'],
+    'Home & Garden': ['Plant Pot', 'Table Lamp', 'Cushion', 'Vase', 'Wall Art', 'Candles', 'Storage Box'],
+    'Sports': ['Yoga Mat', 'Dumbbells', 'Water Bottle', 'Jump Rope', 'Resistance Bands', 'Gym Towel', 'Protein Shaker'],
+    'Books': ['Fiction Novel', 'Self-Help Book', 'Biography', 'Cookbook', 'Notebook', 'Planner', 'Bookmarks'],
+    'Beauty': ['Moisturizer', 'Face Wash', 'Sunscreen', 'Lip Balm', 'Perfume', 'Hand Cream', 'Makeup Brush']
+}
 
-    cust_cat_freq = (cust_df.groupby('Product Category')
-                             .size()
-                             .rename('Own_Freq'))
+def get_customer_purchase_history(df, customer_id):
+    return df[df['Customer ID'] == customer_id]
 
-    # ── Segment popularity ──
-    segment = None
-    seg_popularity = pd.Series(dtype=float)
-    if customer_summary is not None and 'Customer Segment' in customer_summary.columns:
-        row = customer_summary[customer_summary['Customer ID'] == customer_id]
-        if not row.empty:
-            segment = row.iloc[0]['Customer Segment']
-            seg_customers = customer_summary[
-                customer_summary['Customer Segment'] == segment
-            ]['Customer ID'].tolist()
-            seg_df = df[df['Customer ID'].isin(seg_customers)]
-            seg_popularity = (seg_df.groupby('Product Category')
-                                     .size()
-                                     .rename('Seg_Freq'))
+def calculate_frequency(history, category):
+    if history.empty: return 0
+    return len(history[history['Product Category'] == category])
 
-    # ── Global category revenue rank ──
-    global_revenue = df.groupby('Product Category')['Total Amount'].sum()
-    global_rev_norm = (global_revenue / global_revenue.max()).rename('Global_Rev_Norm')
+def calculate_quantity(history, category):
+    if history.empty: return 0
+    cat_purchases = history[history['Product Category'] == category]
+    return cat_purchases['Quantity'].sum() if not cat_purchases.empty else 0
 
-    # ── Combine all categories present in the dataset ──
-    all_cats = df['Product Category'].unique()
-    score_df = pd.DataFrame(index=all_cats)
-    score_df.index.name = 'Category'
+def calculate_recency(history, category):
+    if history.empty: return 0
+    cat_purchases = history[history['Product Category'] == category]
+    if cat_purchases.empty:
+        return 0
 
-    score_df['Own_Freq'] = cust_cat_freq.reindex(score_df.index).fillna(0)
-    score_df['Seg_Freq'] = seg_popularity.reindex(score_df.index).fillna(0)
-    score_df['Global_Rev_Norm'] = global_rev_norm.reindex(score_df.index).fillna(0)
+    latest_date = pd.to_datetime(cat_purchases['Purchase Date']).max()
+    today = pd.to_datetime(history['Purchase Date']).max()
+    days_diff = (today - latest_date).days
+    return max(0, 365 - days_diff)
 
-    # Normalise own & seg freq to 0-1
-    if score_df['Own_Freq'].max() > 0:
-        score_df['Own_Freq_N'] = score_df['Own_Freq'] / score_df['Own_Freq'].max()
+def calculate_category_preference(history, category):
+    if history.empty: return 0
+    total_purchases = len(history)
+    cat_purchases = len(history[history['Product Category'] == category])
+    return cat_purchases / total_purchases if total_purchases > 0 else 0
+
+def get_recommendation_reason(f_norm, q_norm, r_norm, p_norm, category):
+    if f_norm > 0.7 or p_norm > 0.7:
+        return f"Recommended based on your frequent purchases in the {category} category."
+    elif r_norm > 0.7:
+        return f"Recommended based on your recent purchasing behaviour in {category}."
+    elif q_norm > 0.7:
+        return f"Recommended because you often buy large quantities of {category}."
     else:
-        score_df['Own_Freq_N'] = 0
+        return "Recommended based on similar purchasing patterns."
 
-    if score_df['Seg_Freq'].max() > 0:
-        score_df['Seg_Freq_N'] = score_df['Seg_Freq'] / score_df['Seg_Freq'].max()
-    else:
-        score_df['Seg_Freq_N'] = 0
+def get_product_recommendations(df, customer_id, top_n=5):
+    history = get_customer_purchase_history(df, customer_id)
 
-    # Weighted score
-    score_df['Raw_Score'] = (
-        0.40 * score_df['Own_Freq_N'] +
-        0.30 * score_df['Seg_Freq_N'] +
-        0.30 * score_df['Global_Rev_Norm']
-    )
+    if history.empty:
+        return get_popular_products(df, top_n)
 
-    # Scale to 0-100
-    if score_df['Raw_Score'].max() > 0:
-        score_df['Score'] = (score_df['Raw_Score'] / score_df['Raw_Score'].max() * 100).round(1)
-    else:
-        score_df['Score'] = 0
+    purchased_products = history['Product Name'].unique().tolist()
 
-    score_df = score_df.reset_index().sort_values('Score', ascending=False)
+    cat_freq, cat_qty, cat_recency, cat_pref = {}, {}, {}, {}
+    for category in CANDIDATE_PRODUCTS.keys():
+        cat_freq[category] = calculate_frequency(history, category)
+        cat_qty[category] = calculate_quantity(history, category)
+        cat_recency[category] = calculate_recency(history, category)
+        cat_pref[category] = calculate_category_preference(history, category)
 
-    # ── Build reason text ──
-    def build_reason(row):
-        parts = []
-        if row['Own_Freq'] > 0:
-            parts.append(f"customer purchased this {int(row['Own_Freq'])}× personally")
-        if row['Seg_Freq'] > 0 and segment:
-            parts.append(f"popular in '{segment}' segment")
-        rev_rank = global_revenue.rank(ascending=False)[row['Category']]
-        parts.append(f"global revenue rank #{int(rev_rank)}")
-        return '; '.join(parts).capitalize() + '.'
+    max_f = max(cat_freq.values()) if max(cat_freq.values()) > 0 else 1
+    max_q = max(cat_qty.values()) if max(cat_qty.values()) > 0 else 1
+    max_r = max(cat_recency.values()) if max(cat_recency.values()) > 0 else 1
+    max_p = max(cat_pref.values()) if max(cat_pref.values()) > 0 else 1
 
-    score_df['Reason'] = score_df.apply(build_reason, axis=1)
+    products_scored = []
 
-    return score_df[['Category', 'Score', 'Reason']].head(top_n).reset_index(drop=True)
+    for category, products in CANDIDATE_PRODUCTS.items():
+        f_norm = cat_freq[category] / max_f
+        q_norm = cat_qty[category] / max_q
+        r_norm = cat_recency[category] / max_r
+        p_norm = cat_pref[category] / max_p
+
+        score = (f_norm * 0.35) + (q_norm * 0.20) + (r_norm * 0.25) + (p_norm * 0.20)
+        score_val = round(score * 100, 2)
+
+        if score_val == 0:
+            continue
+
+        reason = get_recommendation_reason(f_norm, q_norm, r_norm, p_norm, category)
+
+        for p in products:
+            products_scored.append({
+                'Product': p,
+                'Category': category,
+                'Score': score_val,
+                'Reason': reason
+            })
+
+    # Filter out already purchased products if alternatives exist
+    unseen_products = [p for p in products_scored if p['Product'] not in purchased_products]
+    unseen_products = sorted(unseen_products, key=lambda x: x['Score'], reverse=True)
+
+    seen_products = [p for p in products_scored if p['Product'] in purchased_products]
+    seen_products = sorted(seen_products, key=lambda x: x['Score'], reverse=True)
+
+    final_recommendations = unseen_products
+    if len(final_recommendations) < top_n:
+        final_recommendations.extend(seen_products)
+
+    if len(final_recommendations) < top_n:
+        fallback = get_popular_products(df, top_n)
+        for item in fallback:
+            if item['Product'] not in [p['Product'] for p in final_recommendations]:
+                final_recommendations.append(item)
+
+    return final_recommendations[:top_n]
+
+def get_popular_products(df, top_n=5):
+    cat_counts = df['Product Category'].value_counts()
+    popular_cats = cat_counts.index.tolist()
+    fallback = []
+    for cat in popular_cats:
+        for p in CANDIDATE_PRODUCTS.get(cat, []):
+            fallback.append({
+                'Product': p,
+                'Category': cat,
+                'Score': 'N/A',
+                'Reason': "Popular products you may like"
+            })
+            if len(fallback) >= top_n:
+                return fallback
+    return fallback

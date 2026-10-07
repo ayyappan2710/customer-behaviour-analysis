@@ -1,783 +1,421 @@
-"""
-app.py — Customer Behaviour Analysis & Purchase Prediction System
-Multi-page Streamlit dashboard
-"""
 import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
-import sys
 import os
+import sys
+import plotly.express as px
 
-# ── Path setup — must come before ALL src.* imports ─────────────────────────
-# Resolve the project root (parent of dashboard/) regardless of CWD.
-# This is critical for Streamlit Cloud, where the working directory
-# may be the repo root OR the dashboard/ directory.
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))          # …/dashboard
-PROJECT_ROOT = os.path.abspath(os.path.join(_THIS_DIR, '..'))   # …/project-root
-
-for _p in [PROJECT_ROOT, _THIS_DIR]:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-
+# Add src to path to import modules
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.data_preprocessing import preprocess_pipeline
 from src.analysis import analyze_purchases, customer_behaviour_metrics
-from src.segmentation import perform_clustering, perform_rfm_clustering, segment_statistics
-from src.recommendations import generate_insights, personalised_recommendations
-from src.purchase_patterns import (
-    category_summary, gender_category_matrix, age_category_matrix,
-    payment_pattern, repeat_category_customers, customer_category_heatmap_data
-)
-from src.trend_prediction import daily_trend, monthly_trend, category_monthly_trend, build_forecast
-from src.ml_prediction import train_model, predict_customer
+from src.segmentation import perform_clustering
+from src.recommendations import get_all_recommendations, get_customer_purchase_history, get_product_recommendations
 
-# ── Page config ──────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Customer Behaviour Analytics",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="Customer Behaviour Analysis", layout="wide", page_icon="📊")
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
+# ---------------- Custom CSS for UI/UX Redesign ----------------
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-.main { background-color: #0E1117; }
-[data-testid="stMetricValue"] { font-size: 1.6rem; font-weight: 700; }
-[data-testid="stMetricLabel"] { font-size: 0.78rem; color: #9CA3AF; }
-.stMetric {
-    background: linear-gradient(135deg, #1F2937 0%, #111827 100%);
-    border: 1px solid #374151;
-    border-radius: 12px;
-    padding: 16px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-}
-.rec-card {
-    background: #1F2937;
-    border-left: 4px solid #636EFA;
-    border-radius: 8px;
-    padding: 14px 18px;
-    margin-bottom: 10px;
-}
-.score-bar {
-    height: 8px;
-    border-radius: 4px;
-    background: linear-gradient(90deg, #636EFA, #EF553B);
-}
-h1 { font-size: 2rem !important; }
-h2 { font-size: 1.4rem !important; }
+    /* Metric Cards */
+    .metric-card {
+        background-color: #ffffff;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 15px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        border: 1px solid #f3f4f6;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        color: #1f2937;
+    }
+    .metric-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        border-color: #3b82f6;
+    }
+    .metric-title {
+        font-size: 0.9rem;
+        color: #6b7280;
+        font-weight: 600;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .metric-value {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 0;
+        line-height: 1.2;
+    }
+
+    /* Recommendation Cards */
+    .rec-card {
+        background-color: #ffffff;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 16px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        border-left: 5px solid #3b82f6;
+        border-top: 1px solid #f3f4f6;
+        border-right: 1px solid #f3f4f6;
+        border-bottom: 1px solid #f3f4f6;
+        transition: all 0.3s ease;
+    }
+    .rec-card:hover {
+        transform: translateY(-4px) scale(1.01);
+        box-shadow: 0 12px 20px -5px rgba(0, 0, 0, 0.1);
+        border-left-color: #2563eb;
+    }
+    .rec-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+    .rec-rank {
+        background-color: #eff6ff;
+        color: #2563eb;
+        font-weight: 700;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+    }
+    .rec-score-badge {
+        background-color: #f0fdf4;
+        color: #16a34a;
+        font-weight: 700;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .rec-title {
+        font-size: 1.25rem;
+        font-weight: 700;
+        margin: 0;
+        color: #111827;
+    }
+    .rec-category {
+        font-size: 0.85rem;
+        color: #6b7280;
+        margin-top: 4px;
+        margin-bottom: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .rec-reason {
+        font-size: 0.95rem;
+        font-style: italic;
+        margin-top: 12px;
+        color: #4b5563;
+        background-color: #f9fafb;
+        padding: 10px;
+        border-radius: 8px;
+        border-left: 3px solid #d1d5db;
+    }
+
+    /* Progress Bar */
+    .progress-container {
+        width: 100%;
+        background-color: #e5e7eb;
+        border-radius: 9999px;
+        height: 8px;
+        margin-top: 8px;
+        overflow: hidden;
+    }
+    .progress-bar {
+        height: 100%;
+        border-radius: 9999px;
+        background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+        transition: width 1.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Hero Section */
+    .hero-container {
+        padding: 2rem 0 1.5rem 0;
+        border-bottom: 1px solid #e5e7eb;
+        margin-bottom: 2rem;
+    }
+    .hero-title {
+        font-size: 2.5rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, #1e3a8a, #3b82f6, #8b5cf6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.5rem;
+        line-height: 1.2;
+    }
+    .hero-subtitle {
+        font-size: 1.1rem;
+        color: #4b5563;
+        font-weight: 400;
+    }
+
+    /* Section Headers */
+    .section-header {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #1f2937;
+        margin-top: 2rem;
+        margin-bottom: 1.5rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #f3f4f6;
+    }
+
+    /* Dark Mode Adjustments */
+    @media (prefers-color-scheme: dark) {
+        .metric-card, .rec-card {
+            background-color: #1f2937;
+            border-color: #374151;
+            color: #f3f4f6;
+        }
+        .rec-card:hover { border-left-color: #60a5fa; }
+        .metric-title, .rec-category { color: #9ca3af; }
+        .metric-value, .rec-title { color: #f9fafb; }
+        .rec-rank { background-color: #1e3a8a; color: #bfdbfe; }
+        .rec-score-badge { background-color: #064e3b; color: #a7f3d0; }
+        .rec-reason { background-color: #111827; color: #d1d5db; border-left-color: #4b5563; }
+        .progress-container { background-color: #374151; }
+        .hero-title { background: linear-gradient(135deg, #60a5fa, #a78bfa, #f472b6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .hero-subtitle { color: #9ca3af; }
+        .section-header { color: #f3f4f6; border-bottom-color: #374151; }
+        .hero-container { border-bottom-color: #374151; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Data loading (cached) ─────────────────────────────────────────────────────
-DATA_PATH = os.path.join(PROJECT_ROOT, 'data', 'customer_data.csv')
+# ---------------- Header / Hero Section ----------------
+st.markdown("""
+<div class="hero-container">
+    <div class="hero-title">📊 Customer Behaviour Analysis</div>
+    <div class="hero-subtitle">Analyze customer patterns, purchase behaviour, and personalized product recommendations.</div>
+</div>
+""", unsafe_allow_html=True)
 
-if not os.path.exists(DATA_PATH):
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "generate_data", os.path.join(PROJECT_ROOT, 'data', 'generate_data.py'))
-        gen_mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(gen_mod)
-        gen_mod.generate_customer_data()
-    except Exception as _e:
-        st.error(f"Could not auto-generate dataset: {_e}")
+# Data Loading
+@st.cache_data
+def load_and_process_data(filepath):
+    if not os.path.exists(filepath):
+        return None, None
 
+    df_clean = preprocess_pipeline(filepath)
+    if df_clean is not None:
+        customer_summary = customer_behaviour_metrics(df_clean)
+        df_clustered, kmeans_model = perform_clustering(customer_summary, n_clusters=3)
+        return df_clean, df_clustered
+    return None, None
 
-@st.cache_data(show_spinner="Loading & processing data…")
-def load_data():
-    return preprocess_pipeline(DATA_PATH)
+DATA_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'customer_data.csv')
 
+with st.spinner("Loading and processing data..."):
+    df, customer_summary = load_and_process_data(DATA_PATH)
 
-@st.cache_data(show_spinner="Building customer profiles…")
-def load_customer_summary(_df):
-    cs = customer_behaviour_metrics(_df)
-    cs, _ = perform_clustering(cs, n_clusters=3)
-    return cs
+if df is not None and customer_summary is not None:
 
+    # ---------------- Sidebar UX ----------------
+    with st.sidebar:
+        st.markdown("### 🎛️ Dashboard Controls")
+        st.markdown("Use the filters below to slice the data.")
 
-@st.cache_data(show_spinner="Running RFM segmentation…")
-def load_rfm(_df):
-    rfm, _ = perform_rfm_clustering(_df, n_clusters=4)
-    return rfm
+        gender_filter = st.multiselect("👥 Select Gender", options=df['Gender'].unique(), default=df['Gender'].unique())
+        age_filter = st.multiselect("📅 Select Age Group", options=df['Age Group'].dropna().unique(), default=df['Age Group'].dropna().unique())
+        category_filter = st.multiselect("📦 Select Product Category", options=df['Product Category'].unique(), default=df['Product Category'].unique())
 
+    # Apply filters to main dataframe
+    mask = (df['Gender'].isin(gender_filter)) & \
+           (df['Age Group'].isin(age_filter)) & \
+           (df['Product Category'].isin(category_filter))
 
-@st.cache_resource(show_spinner="Training ML model…")
-def load_ml_model(_df):
-    return train_model(_df)
+    filtered_df = df[mask]
+    metrics = analyze_purchases(filtered_df)
 
+    # ---------------- Overview (KPIs) ----------------
+    st.markdown('<div class="section-header">📈 Business Overview</div>', unsafe_allow_html=True)
 
-df = load_data()
+    col1, col2, col3, col4, col5 = st.columns(5)
 
-if df is None:
-    st.error(f"❌ Cannot load dataset from `{DATA_PATH}`. Please run `python data/generate_data.py` first.")
-    st.stop()
+    def metric_html(icon, title, value):
+        return f"""
+        <div class="metric-card">
+            <div class="metric-title">{icon} {title}</div>
+            <div class="metric-value">{value}</div>
+        </div>
+        """
 
-customer_summary = load_customer_summary(df)
-rfm_df = load_rfm(df)
-ml_model, ml_scaler, ml_encoders, ml_metrics, ml_features, ml_X_df, ml_importance = load_ml_model(df)
+    col1.markdown(metric_html("👥", "Customers", f"{len(filtered_df['Customer ID'].unique()):,}"), unsafe_allow_html=True)
+    col2.markdown(metric_html("💰", "Total Revenue", f"₹{metrics.get('total_sales', 0):,.2f}"), unsafe_allow_html=True)
+    col3.markdown(metric_html("🛒", "Total Orders", f"{metrics.get('total_orders', 0):,}"), unsafe_allow_html=True)
+    col4.markdown(metric_html("📊", "Avg Order Value", f"₹{metrics.get('average_order_value', 0):,.2f}"), unsafe_allow_html=True)
+    col5.markdown(metric_html("📦", "Units Sold", f"{metrics.get('total_quantity_sold', 0):,}"), unsafe_allow_html=True)
 
-ALL_CUSTOMERS = sorted(df['Customer ID'].unique().tolist())
+    # ---------------- Analytics Section ----------------
+    st.markdown('<div class="section-header">📊 Customer Behaviour Analytics</div>', unsafe_allow_html=True)
 
-# ── Sidebar navigation ────────────────────────────────────────────────────────
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=72)
-    st.markdown("## 📈 Analytics Hub")
-    st.markdown("---")
-    page = st.radio(
-        "Navigation",
-        [
-            "🏠 Dashboard",
-            "📊 Customer Behaviour",
-            "👥 Customer Segmentation",
-            "🛒 Purchase Patterns",
-            "📈 Trend Prediction",
-            "🎯 Recommendations",
-            "🤖 AI/ML Prediction",
-        ],
-        label_visibility="collapsed",
-    )
-    st.markdown("---")
-    st.caption(f"📁 Dataset: {len(df):,} records · {df['Customer ID'].nunique():,} customers")
+    col_chart1, col_chart2 = st.columns(2)
 
+    with col_chart1:
+        if not filtered_df.empty:
+            cat_sales = filtered_df.groupby('Product Category')['Total Amount'].sum().reset_index()
+            fig1 = px.bar(cat_sales, x='Total Amount', y='Product Category', orientation='h',
+                          title="Revenue by Category", color='Total Amount', color_continuous_scale='Blues')
+            fig1.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig1, use_container_width=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 1 — DASHBOARD (Home)
-# ═══════════════════════════════════════════════════════════════════════════════
-if page == "🏠 Dashboard":
-    st.title("📈 Customer Behaviour Analysis & Purchase Prediction")
-    st.markdown("*A professional analytics system built on real customer transaction data.*")
-    st.markdown("---")
+    with col_chart2:
+        if not filtered_df.empty:
+            unique_cust = filtered_df.drop_duplicates(subset=['Customer ID'])
+            fig2 = px.histogram(unique_cust, x='Age', nbins=20, title="Customer Age Distribution", color_discrete_sequence=['#8b5cf6'])
+            fig2.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig2, use_container_width=True)
 
-    purchases = analyze_purchases(df)
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("👥 Customers", f"{df['Customer ID'].nunique():,}")
-    c2.metric("💰 Total Revenue", f"${purchases.get('total_sales',0):,.0f}")
-    c3.metric("🛒 Total Orders", f"{len(df):,}")
-    c4.metric("📊 Avg Order Value", f"${purchases.get('average_order_value',0):,.2f}")
-    c5.metric("📦 Units Sold", f"{purchases.get('total_quantity_sold',0):,}")
+    # ---------------- Customer Segmentation ----------------
+    st.markdown('<div class="section-header">🎯 Customer Segmentation</div>', unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    col_a, col_b = st.columns(2)
-    with col_a:
-        _cat = df.groupby('Product Category')['Total Amount'].sum().sort_values(ascending=False)
-        _cat_labels = list(_cat.index.astype(str))
-        _cat_values = [float(v) for v in _cat.values]
-        fig = go.Figure(go.Bar(
-            x=_cat_labels, y=_cat_values,
-            text=[f"${v:,.0f}" for v in _cat_values],
-            textposition='auto',
-            marker_color=px.colors.qualitative.Plotly[:len(_cat_labels)],
-        ))
-        fig.update_layout(
-            title='Revenue by Category',
-            xaxis_title='Product Category',
-            yaxis_title='Total Revenue ($)',
-            template='plotly_dark',
-            showlegend=False,
-            yaxis=dict(range=[0, max(_cat_values) * 1.15]),
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    if 'Customer_Segment' in customer_summary.columns:
+        col_seg1, col_seg2 = st.columns([2, 1])
 
-    with col_b:
-        _monthly = monthly_trend(df)
-        _m_labels = list(_monthly['YearMonth'].astype(str))
-        _m_values = [float(v) for v in _monthly['Monthly_Revenue'].values]
-        fig2 = go.Figure(go.Scatter(
-            x=_m_labels, y=_m_values,
-            mode='lines+markers',
-            line=dict(color='#636EFA', width=2),
-            marker=dict(size=7),
-            text=[f"${v:,.0f}" for v in _m_values],
-            hovertemplate='%{x}<br>Revenue: $%{y:,.0f}<extra></extra>',
-        ))
-        fig2.update_layout(
-            title='Monthly Revenue Trend',
-            xaxis_title='Month',
-            yaxis_title='Revenue ($)',
-            template='plotly_dark',
-            yaxis=dict(range=[0, max(_m_values) * 1.15]),
-        )
-        st.plotly_chart(fig2, use_container_width=True)
-
-    col_c, col_d = st.columns(2)
-    with col_c:
-        _grev = df.groupby('Gender')['Total Amount'].sum()
-        _g_labels = list(_grev.index.astype(str))
-        _g_values = [float(v) for v in _grev.values]
-        fig3 = go.Figure(go.Pie(
-            labels=_g_labels,
-            values=_g_values,
-            hole=0.4,
-            textinfo='label+percent',
-            hovertemplate='%{label}<br>Revenue: $%{value:,.0f}<br>%{percent}<extra></extra>',
-        ))
-        fig3.update_layout(
-            title='Revenue by Gender',
-            template='plotly_dark',
-        )
-        st.plotly_chart(fig3, use_container_width=True)
-
-    with col_d:
-        if not rfm_df.empty and 'Customer Segment' in rfm_df.columns:
-            _seg = rfm_df['Customer Segment'].value_counts()
-            _seg_labels = list(_seg.index.astype(str))
-            _seg_counts = [int(v) for v in _seg.values]
-            fig4 = go.Figure(go.Pie(
-                labels=_seg_labels,
-                values=_seg_counts,
-                hole=0.4,
-                textinfo='label+percent',
-                hovertemplate='%{label}<br>Customers: %{value}<br>%{percent}<extra></extra>',
-            ))
-            fig4.update_layout(
-                title='Customer Segment Distribution',
-                template='plotly_dark',
+        with col_seg1:
+            fig_cluster = px.scatter(
+                customer_summary,
+                x='Total_Spending',
+                y='Purchase_Frequency',
+                color='Customer_Segment',
+                size='Average_Purchase_Value',
+                hover_data=['Customer ID'],
+                title="Customer Segments: Spending vs Frequency",
+                color_discrete_sequence=px.colors.qualitative.Pastel
             )
-            st.plotly_chart(fig4, use_container_width=True)
+            fig_cluster.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig_cluster, use_container_width=True)
 
-    # Quick insights
-    st.markdown("### 💡 Quick Insights")
-    insights = generate_insights(df, customer_summary)
-    cols = st.columns(2)
-    for i, ins in enumerate(insights):
-        if isinstance(ins, dict):
-            with cols[i % 2]:
-                st.info(f"**{ins['type']}**\n\n{ins['insight']}\n\n*{ins['recommendation']}*")
+        with col_seg2:
+            seg_counts = customer_summary['Customer_Segment'].value_counts().reset_index()
+            seg_counts.columns = ['Segment', 'Count']
+            fig_pie = px.pie(seg_counts, values='Count', names='Segment', hole=0.4, title="Segment Distribution", color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig_pie.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig_pie, use_container_width=True)
+    else:
+        st.info("Not enough data to perform clustering.")
 
+    # ---------------- Personalized Recommendations ----------------
+    st.markdown('<div class="section-header">🎯 Personalized Product Recommendations</div>', unsafe_allow_html=True)
+    st.markdown("<p style='color: #6b7280; font-size: 1.1rem; margin-bottom: 2rem;'>Select a customer to view their previous purchases and receive dynamically generated product recommendations based on their unique behaviour.</p>", unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 2 — CUSTOMER BEHAVIOUR
-# ═══════════════════════════════════════════════════════════════════════════════
-elif page == "📊 Customer Behaviour":
-    st.title("📊 Customer Behaviour Analysis")
-    st.markdown("Explore purchasing behaviour across demographics, categories, and time.")
-    st.markdown("---")
-
-    # ── Filters ──────────────────────────────────────────────────────────────
-    with st.expander("🔍 Filters", expanded=True):
-        fc1, fc2, fc3, fc4 = st.columns(4)
-        with fc1:
-            sel_gender = st.multiselect("Gender", df['Gender'].unique(),
-                                        default=df['Gender'].unique())
-        with fc2:
-            sel_cat = st.multiselect("Product Category",
-                                     df['Product Category'].unique(),
-                                     default=df['Product Category'].unique())
-        with fc3:
-            age_groups = df['Age Group'].cat.categories.tolist() if hasattr(df['Age Group'], 'cat') else df['Age Group'].unique().tolist()
-            sel_age = st.multiselect("Age Group", age_groups, default=age_groups)
-        with fc4:
-            sel_pay = st.multiselect("Payment Method",
-                                     df['Payment Method'].unique(),
-                                     default=df['Payment Method'].unique())
-        date_min = df['Purchase Date'].min().date()
-        date_max = df['Purchase Date'].max().date()
-        d1, d2 = st.columns(2)
-        sel_start = d1.date_input("From", value=date_min, min_value=date_min, max_value=date_max)
-        sel_end = d2.date_input("To", value=date_max, min_value=date_min, max_value=date_max)
-
-    fdf = df[
-        df['Gender'].isin(sel_gender) &
-        df['Product Category'].isin(sel_cat) &
-        df['Age Group'].isin(sel_age) &
-        df['Payment Method'].isin(sel_pay) &
-        (df['Purchase Date'].dt.date >= sel_start) &
-        (df['Purchase Date'].dt.date <= sel_end)
-    ]
-
-    if fdf.empty:
-        st.warning("No data matches the selected filters.")
-        st.stop()
-
-    # ── KPIs ──────────────────────────────────────────────────────────────────
-    p = analyze_purchases(fdf)
-    top_cat_qty = fdf.groupby('Product Category')['Quantity'].sum().idxmax()
-    top_cat_rev = fdf.groupby('Product Category')['Total Amount'].sum().idxmax()
-    top_cust = fdf.groupby('Customer ID')['Total Amount'].sum().idxmax()
-
-    k1,k2,k3,k4,k5 = st.columns(5)
-    k1.metric("👥 Customers", f"{fdf['Customer ID'].nunique():,}")
-    k2.metric("🛒 Orders", f"{len(fdf):,}")
-    k3.metric("💰 Revenue", f"${p.get('total_sales',0):,.0f}")
-    k4.metric("📊 Avg Order", f"${p.get('average_order_value',0):,.2f}")
-    k5.metric("📦 Units", f"{p.get('total_quantity_sold',0):,}")
-
-    k6,k7,k8,k9,k10 = st.columns(5)
-    k6.metric("🏆 Top Category (Qty)", top_cat_qty)
-    k7.metric("💎 Top Category (Rev)", top_cat_rev)
-    k8.metric("⭐ Most Active Customer", top_cust)
-    k9.metric("🧮 Avg Qty/Order", f"{fdf['Quantity'].mean():.2f}")
-    k10.metric("💵 Avg Customer Spend", f"${fdf.groupby('Customer ID')['Total Amount'].sum().mean():,.2f}")
+    # Customer selector with distinct styling
+    col_sel, _ = st.columns([1, 2])
+    with col_sel:
+        customer_list = df['Customer ID'].unique()
+        selected_customer = st.selectbox("👤 Select Customer:", customer_list, index=0)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Charts ────────────────────────────────────────────────────────────────
-    tab_a, tab_b, tab_c = st.tabs(["📦 Category Analysis", "👤 Demographics", "📅 Time Trends"])
+    col_hist, col_rec = st.columns([1.2, 1])
 
-    with tab_a:
-        ca1, ca2 = st.columns(2)
-        with ca1:
-            cat_r = fdf.groupby('Product Category', as_index=False)['Total Amount'].sum()
-            fig = px.bar(cat_r, x='Product Category', y='Total Amount',
-                         color='Product Category', text_auto='$.0f',
-                         template='plotly_dark', title='Revenue by Category')
-            st.plotly_chart(fig, use_container_width=True)
-        with ca2:
-            cat_q = fdf.groupby('Product Category', as_index=False)['Quantity'].sum()
-            fig = px.bar(cat_q, x='Product Category', y='Quantity',
-                         color='Product Category', text_auto='d',
-                         template='plotly_dark', title='Quantity by Category')
-            st.plotly_chart(fig, use_container_width=True)
+    with col_hist:
+        st.markdown("### 📜 Previous Purchase History")
+        history = get_customer_purchase_history(df, selected_customer)
+        if not history.empty:
+            cols_to_show = ['Purchase Date', 'Product Category']
+            if 'Product Name' in history.columns:
+                cols_to_show.append('Product Name')
+            cols_to_show.extend(['Quantity', 'Total Amount', 'Payment Method'])
+            st.dataframe(history[cols_to_show].sort_values('Purchase Date', ascending=False), use_container_width=True, hide_index=True)
+        else:
+            st.info("No purchase history found for this customer.")
 
-    with tab_b:
-        cb1, cb2 = st.columns(2)
-        with cb1:
-            gen_r = fdf.groupby('Gender', as_index=False)['Total Amount'].sum()
-            fig = px.pie(gen_r, names='Gender', values='Total Amount',
-                         hole=0.4, template='plotly_dark',
-                         color_discrete_sequence=px.colors.qualitative.Pastel,
-                         title='Revenue by Gender')
-            st.plotly_chart(fig, use_container_width=True)
-        with cb2:
-            pay_r = fdf.groupby('Payment Method', as_index=False)['Customer ID'].count()
-            fig = px.bar(pay_r, x='Payment Method', y='Customer ID',
-                         color='Payment Method', text_auto='d',
-                         template='plotly_dark', title='Payment Method Distribution',
-                         labels={'Customer ID': 'Order Count'})
-            st.plotly_chart(fig, use_container_width=True)
+    with col_rec:
+        st.markdown("### ✨ Recommended For You")
+        recommendations = get_product_recommendations(df, selected_customer, top_n=5)
 
-        cb3, cb4 = st.columns(2)
-        with cb3:
-            spend = fdf.groupby('Customer ID')['Total Amount'].sum()
-            fig = px.histogram(spend, nbins=30, template='plotly_dark',
-                               title='Customer Spending Distribution',
-                               labels={'value': 'Total Spending', 'count': 'Customers'})
-            st.plotly_chart(fig, use_container_width=True)
-        with cb4:
-            if 'Age Group' in fdf.columns:
-                age_cat = fdf.groupby(['Age Group', 'Product Category'], observed=True,
-                                      as_index=False)['Total Amount'].sum()
-                fig = px.bar(age_cat, x='Age Group', y='Total Amount',
-                             color='Product Category', barmode='group',
-                             template='plotly_dark', title='Age Group vs Category Revenue')
-                st.plotly_chart(fig, use_container_width=True)
+        if recommendations:
+            for idx, item in enumerate(recommendations):
+                # Clean and parse score
+                raw_score = item['Score']
+                if raw_score != 'N/A':
+                    try:
+                        score_val = float(raw_score)
+                    except:
+                        score_val = 0.0
+                else:
+                    score_val = 0.0
 
-    with tab_c:
-        mon = monthly_trend(fdf)
-        ct1, ct2 = st.columns(2)
-        with ct1:
-            fig = px.line(mon, x='YearMonth', y='Monthly_Revenue',
-                          markers=True, template='plotly_dark',
-                          title='Monthly Revenue Trend')
-            fig.update_layout(yaxis=dict(tickformat="$,.0f"))
-            st.plotly_chart(fig, use_container_width=True)
-        with ct2:
-            fig = px.bar(mon, x='YearMonth', y='Monthly_Orders',
-                         template='plotly_dark', title='Monthly Order Count')
-            st.plotly_chart(fig, use_container_width=True)
+                score_str = f"{score_val:.1f} / 100" if raw_score != 'N/A' else "N/A"
+                progress_width = score_val if raw_score != 'N/A' else 0
 
-        cat_mon = category_monthly_trend(fdf)
-        fig = px.line(cat_mon, x='YearMonth', y='Revenue',
-                      color='Product Category', markers=True,
-                      template='plotly_dark', title='Category-wise Monthly Revenue')
-        fig.update_layout(yaxis=dict(tickformat="$,.0f"))
-        st.plotly_chart(fig, use_container_width=True)
+                # Render Recommendation Card HTML
+                card_html = f"""
+                <div class="rec-card">
+                    <div class="rec-header">
+                        <span class="rec-rank">#{idx+1}</span>
+                        <span class="rec-score-badge">⭐ {score_str}</span>
+                    </div>
+                    <h3 class="rec-title">{item['Product']}</h3>
+                    <div class="rec-category">Category: {item.get('Category', 'General')}</div>
 
+                    <div class="progress-container">
+                        <div class="progress-bar" style="width: {progress_width}%;"></div>
+                    </div>
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 3 — CUSTOMER SEGMENTATION
-# ═══════════════════════════════════════════════════════════════════════════════
-elif page == "👥 Customer Segmentation":
-    st.title("👥 Customer Segmentation")
-    st.markdown("Customers are grouped using **K-Means clustering** on RFM (Recency, Frequency, Monetary) features.")
-    st.markdown("---")
+                    <div class="rec-reason">
+                        "{item['Reason']}"
+                    </div>
+                </div>
+                """
+                st.markdown(card_html, unsafe_allow_html=True)
+        else:
+            st.info("No recommendations available.")
 
-    if rfm_df.empty:
-        st.warning("Not enough data for segmentation.")
-        st.stop()
+    # ---------------- Data-Driven Insights ----------------
+    st.markdown('<div class="section-header">💡 Business Insights & Recommendations</div>', unsafe_allow_html=True)
 
-    seg_stats = segment_statistics(rfm_df)
+    # Generate insights based on the unfiltered metrics to give overall business advice
+    overall_metrics = analyze_purchases(df)
+    insights = get_all_recommendations(df, customer_summary, overall_metrics.get('revenue_by_category', {}))
 
-    # ── Segment overview ──────────────────────────────────────────────────────
-    st.subheader("📊 Segment Overview")
-    ov1, ov2 = st.columns(2)
-    with ov1:
-        fig = px.bar(seg_stats, x='Customer Segment', y='Customer_Count',
-                     color='Customer Segment', text='Customer_Count',
-                     template='plotly_dark', title='Customer Count per Segment')
-        st.plotly_chart(fig, use_container_width=True)
-    with ov2:
-        fig = px.bar(seg_stats, x='Customer Segment', y='Total_Revenue',
-                     color='Customer Segment', text_auto='$.0f',
-                     template='plotly_dark', title='Revenue per Segment')
-        st.plotly_chart(fig, use_container_width=True)
+    for idx, insight in enumerate(insights):
+        with st.expander(f"{insight['type']}: {insight['finding']}", expanded=(idx<2)):
+            st.markdown(f"**Recommendation:** {insight['recommendation']}")
 
-    # Stats table
-    st.subheader("📋 Segment Statistics")
+    # ---------------- Customer Details Table ----------------
+    st.markdown('<div class="section-header">📋 Customer Details</div>', unsafe_allow_html=True)
+
     st.dataframe(
-        seg_stats.style.background_gradient(cmap='Blues', subset=['Total_Revenue']),
+        customer_summary[['Customer ID', 'Age', 'Gender', 'Purchase_Frequency', 'Total_Spending', 'Average_Purchase_Value', 'Total_Quantity', 'Customer_Segment']],
         use_container_width=True,
+        hide_index=True
     )
 
-    # ── Scatter plot ──────────────────────────────────────────────────────────
-    st.subheader("🔵 Cluster Scatter — Spending vs. Frequency")
-    fig = px.scatter(
-        rfm_df, x='Monetary', y='Frequency',
-        color='Customer Segment', size='Avg_Order_Value',
-        hover_data=['Customer ID', 'Recency'],
-        template='plotly_dark',
-        color_discrete_sequence=px.colors.qualitative.Vivid,
-        title='RFM Clusters: Spending vs. Purchase Frequency',
-    )
-    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-    st.plotly_chart(fig, use_container_width=True)
+    # ---------------- Export Data ----------------
+    st.markdown('<div class="section-header">💾 Export Data</div>', unsafe_allow_html=True)
 
-    # ── Spending distribution per segment ─────────────────────────────────────
-    st.subheader("💰 Spending Distribution by Segment")
-    fig = px.box(rfm_df, x='Customer Segment', y='Monetary',
-                 color='Customer Segment', template='plotly_dark',
-                 title='Monetary Distribution per Segment')
-    st.plotly_chart(fig, use_container_width=True)
+    # Convert dataframe to CSV for download
+    @st.cache_data
+    def convert_df(df_to_convert):
+        return df_to_convert.to_csv(index=False).encode('utf-8')
 
-    # ── Customer lookup ───────────────────────────────────────────────────────
-    st.markdown("---")
-    st.subheader("🔍 Customer Profile Lookup")
-    sel_cust = st.selectbox("Select a Customer ID", ALL_CUSTOMERS)
-    cust_row = rfm_df[rfm_df['Customer ID'] == sel_cust]
-    if not cust_row.empty:
-        r = cust_row.iloc[0]
-        p1, p2, p3, p4, p5, p6 = st.columns(6)
-        p1.metric("Segment", r.get('Customer Segment', 'N/A'))
-        p2.metric("💰 Total Spending", f"${r.get('Monetary',0):,.2f}")
-        p3.metric("🛒 Orders", int(r.get('Frequency', 0)))
-        p4.metric("📦 Quantity", int(r.get('Total_Quantity', 0)))
-        p5.metric("📊 Avg Order", f"${r.get('Avg_Order_Value',0):,.2f}")
-        p6.metric("📅 Last Purchase", str(r.get('Last_Purchase', 'N/A'))[:10])
-    else:
-        st.warning("Customer not found in RFM data.")
+    csv_clean = convert_df(df)
+    csv_summary = convert_df(customer_summary)
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 4 — PURCHASE PATTERNS
-# ═══════════════════════════════════════════════════════════════════════════════
-elif page == "🛒 Purchase Patterns":
-    st.title("🛒 Purchase Pattern Analysis")
-    st.info("ℹ️ This dataset contains **Product Category** data. All pattern analysis is performed at the **category level**.")
-    st.markdown("---")
-
-    cat_sum = category_summary(df)
-    pay_sum = payment_pattern(df)
-
-    # Category summary
-    st.subheader("📦 Category Summary")
-    st.dataframe(cat_sum.style.background_gradient(cmap='Blues', subset=['Total_Revenue']),
-                 use_container_width=True)
-
-    pp1, pp2 = st.columns(2)
-    with pp1:
-        fig = px.bar(cat_sum, x='Product Category', y='Total_Revenue',
-                     color='Product Category', text_auto='$.0f',
-                     template='plotly_dark', title='Revenue by Category')
-        st.plotly_chart(fig, use_container_width=True)
-    with pp2:
-        fig = px.bar(cat_sum, x='Product Category', y='Unique_Customers',
-                     color='Product Category', text_auto='d',
-                     template='plotly_dark', title='Unique Customers per Category')
-        st.plotly_chart(fig, use_container_width=True)
-
-    # Payment patterns
-    st.subheader("💳 Payment Method Patterns")
-    pp3, pp4 = st.columns(2)
-    with pp3:
-        fig = px.bar(pay_sum, x='Payment Method', y='Order_Count',
-                     color='Payment Method', text_auto='d',
-                     template='plotly_dark', title='Orders by Payment Method')
-        st.plotly_chart(fig, use_container_width=True)
-    with pp4:
-        fig = px.pie(pay_sum, names='Payment Method', values='Total_Revenue',
-                     hole=0.4, template='plotly_dark',
-                     title='Revenue by Payment Method')
-        st.plotly_chart(fig, use_container_width=True)
-
-    # Gender × Category
-    st.subheader("👤 Gender × Category Preference")
-    gc_mat = gender_category_matrix(df)
-    if not gc_mat.empty:
-        fig = px.imshow(gc_mat, text_auto='.0f', aspect='auto',
-                        color_continuous_scale='Blues', template='plotly_dark',
-                        title='Revenue Heatmap: Gender vs Category')
-        st.plotly_chart(fig, use_container_width=True)
-
-    # Age × Category
-    st.subheader("👶 Age Group × Category Preference")
-    ac_mat = age_category_matrix(df)
-    if not ac_mat.empty:
-        fig = px.imshow(ac_mat, text_auto='d', aspect='auto',
-                        color_continuous_scale='Purples', template='plotly_dark',
-                        title='Order Count Heatmap: Age Group vs Category')
-        st.plotly_chart(fig, use_container_width=True)
-
-    # Repeat buyers
-    st.subheader("🔁 Repeat Category Purchasers")
-    repeat = repeat_category_customers(df, min_purchases=3)
-    if not repeat.empty:
-        st.dataframe(repeat.head(30), use_container_width=True)
-    else:
-        st.info("No customer-category pair with 3+ purchases found.")
-
-    # Customer-Category heatmap
-    st.subheader("🔥 Customer × Category Purchase Heatmap (Top 30 Customers)")
-    hm = customer_category_heatmap_data(df)
-    if not hm.empty:
-        fig = px.imshow(hm, aspect='auto', color_continuous_scale='YlOrRd',
-                        template='plotly_dark',
-                        title='Quantity Heatmap: Top Customers vs Categories')
-        st.plotly_chart(fig, use_container_width=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 5 — TREND PREDICTION
-# ═══════════════════════════════════════════════════════════════════════════════
-elif page == "📈 Trend Prediction":
-    st.title("📈 Trend Prediction & Forecasting")
-    st.warning("""
-⚠️ **Model Limitation Notice**
-This forecast uses a Random Forest Regressor trained on historical monthly data.
-Predictions are **indicative trend estimates only** — not financial forecasts.
-Accuracy depends on data volume and seasonality.
-    """)
-    st.markdown("---")
-
-    n_forecast = st.slider("Months to forecast ahead", 1, 6, 3)
-
-    with st.spinner("Building forecast…"):
-        history_df, forecast_df, fc_metrics = build_forecast(df, periods_ahead=n_forecast)
-
-    if 'error' in fc_metrics:
-        st.error(fc_metrics['error'])
-    else:
-        # Model metrics
-        m1, m2 = st.columns(2)
-        m1.metric("📉 MAE (Mean Absolute Error)", f"${fc_metrics.get('MAE', 'N/A'):,}")
-        m2.metric("📐 R² Score", fc_metrics.get('R2', 'N/A'))
-
-        # Historical + Forecast chart
-        st.subheader("📊 Historical Revenue & Forecast")
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=history_df['YearMonth'], y=history_df['Monthly_Revenue'],
-            mode='lines+markers', name='Historical Revenue',
-            line=dict(color='#636EFA', width=2)
-        ))
-        fig.add_trace(go.Scatter(
-            x=history_df['YearMonth'], y=history_df['Predicted_Revenue'],
-            mode='lines', name='Model Fit',
-            line=dict(color='#EF553B', width=2, dash='dot')
-        ))
-        if not forecast_df.empty:
-            fig.add_trace(go.Scatter(
-                x=forecast_df['YearMonth'], y=forecast_df['Predicted_Revenue'],
-                mode='lines+markers', name='Forecast',
-                line=dict(color='#00CC96', width=2, dash='dash')
-            ))
-        fig.update_layout(template='plotly_dark', hovermode='x unified',
-                          xaxis_title='Month', yaxis_title='Revenue ($)')
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Forecast table
-        if not forecast_df.empty:
-            st.subheader(f"📋 Forecast for Next {n_forecast} Month(s)")
-            fc_display = forecast_df[['YearMonth', 'Predicted_Revenue']].copy()
-            fc_display.columns = ['Month', 'Predicted Revenue ($)']
-            fc_display['Trend'] = fc_display['Predicted Revenue ($)'].diff().apply(
-                lambda x: '📈 Up' if x > 0 else ('📉 Down' if x < 0 else '➡️ Flat')
-            ).fillna('—')
-            st.dataframe(fc_display, use_container_width=True)
-
-    # Daily trend
-    st.subheader("📅 Daily Sales Trend")
-    daily = daily_trend(df)
-    fig = px.line(daily, x='Date', y='Daily_Revenue', template='plotly_dark',
-                  title='Daily Revenue')
-    fig.update_layout(yaxis=dict(tickformat="$,.0f"))
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Category-wise monthly
-    st.subheader("🗂️ Category-Wise Monthly Revenue")
-    cat_mon = category_monthly_trend(df)
-    fig = px.line(cat_mon, x='YearMonth', y='Revenue',
-                  color='Product Category', markers=True,
-                  template='plotly_dark', title='Category Monthly Revenue Trend')
-    fig.update_layout(yaxis=dict(tickformat="$,.0f"))
-    st.plotly_chart(fig, use_container_width=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 6 — RECOMMENDATIONS
-# ═══════════════════════════════════════════════════════════════════════════════
-elif page == "🎯 Recommendations":
-    st.title("🎯 Personalised Recommendations")
-    st.markdown("""
-Recommendations are generated from **actual customer purchase behaviour** using a
-transparent weighted scoring system:
-
-| Component | Weight | Source |
-|---|---|---|
-| Customer's own purchase frequency | **40%** | Customer transaction history |
-| Popularity in customer's segment | **30%** | RFM cluster peer behaviour |
-| Global category revenue rank | **30%** | Overall dataset revenue |
-    """)
-    st.markdown("---")
-
-    # Business-wide insights
-    st.subheader("💡 Business-Wide Insights")
-    insights = generate_insights(df, customer_summary)
-    for ins in insights:
-        if isinstance(ins, dict):
-            with st.expander(f"📌 {ins['type']}", expanded=True):
-                st.write(f"**Insight:** {ins['insight']}")
-                st.write(f"**Recommendation:** {ins['recommendation']}")
-
-    st.markdown("---")
-
-    # Personalised
-    st.subheader("🔍 Personalised Category Recommendations")
-    sel_cust = st.selectbox("Select Customer ID", ALL_CUSTOMERS, key='rec_cust')
-
-    cust_history = df[df['Customer ID'] == sel_cust]
-    if not cust_history.empty:
-        with st.expander("📜 This customer's purchase history", expanded=False):
-            hist_cat = (cust_history.groupby('Product Category')
-                                    .agg(Orders=('Customer ID','count'),
-                                         Total_Spent=('Total Amount','sum'))
-                                    .reset_index()
-                                    .sort_values('Orders', ascending=False))
-            st.dataframe(hist_cat, use_container_width=True)
-
-    recs = personalised_recommendations(sel_cust, df, rfm_df, top_n=4)
-    if recs.empty:
-        st.warning("Could not generate recommendations for this customer.")
-    else:
-        for _, row in recs.iterrows():
-            score = row['Score']
-            bar_width = int(score)
-            st.markdown(f"""
-<div class="rec-card">
-  <strong>📦 {row['Category']}</strong>
-  &nbsp;&nbsp;<span style="color:#636EFA; font-size:1.1rem; font-weight:700;">{score}/100</span><br>
-  <div style="background:#374151; border-radius:4px; height:8px; margin:8px 0;">
-    <div style="width:{bar_width}%; height:8px; border-radius:4px;
-         background:linear-gradient(90deg,#636EFA,#EF553B);"></div>
-  </div>
-  <small style="color:#9CA3AF;">💡 {row['Reason']}</small>
-</div>
-""", unsafe_allow_html=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAGE 7 — AI/ML PREDICTION
-# ═══════════════════════════════════════════════════════════════════════════════
-elif page == "🤖 AI/ML Prediction":
-    st.title("🤖 AI/ML Purchase Prediction")
-    st.info("""
-**Model:** Random Forest Classifier  
-**Target variable (proxy):** A customer is classified as *High Activity* (likely to purchase again) if their historical
-purchase frequency exceeds the dataset median. This is derived **entirely from past behaviour** — no future data is used.  
-**Features used:** Age, Recency, Frequency, Monetary value, Avg order value, Total quantity, Gender, Preferred category, Preferred payment method.
-    """)
-    st.markdown("---")
-
-    if ml_model is None:
-        st.error("ML model could not be trained. Check that the dataset has enough diverse records.")
-        st.stop()
-
-    # ── Model Performance ─────────────────────────────────────────────────────
-    st.subheader("📊 Model Performance Metrics")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("✅ Accuracy", f"{ml_metrics.get('Accuracy','N/A')}%")
-    m2.metric("🎯 Precision", f"{ml_metrics.get('Precision','N/A')}%")
-    m3.metric("🔁 Recall", f"{ml_metrics.get('Recall','N/A')}%")
-    m4.metric("⚖️ F1 Score", f"{ml_metrics.get('F1 Score','N/A')}%")
-
-    split_col1, split_col2 = st.columns(2)
-    split_col1.caption(f"🏋️ Train samples: {ml_metrics.get('Train_Size','N/A')}")
-    split_col2.caption(f"🧪 Test samples: {ml_metrics.get('Test_Size','N/A')}")
-
-    # Confusion matrix
-    cm = ml_metrics.get('Confusion_Matrix', None)
-    if cm:
-        st.subheader("🔲 Confusion Matrix")
-        cm_arr = np.array(cm)
-        labels = ['Low Activity', 'High Activity']
-        fig_cm = px.imshow(
-            cm_arr, x=labels, y=labels,
-            text_auto=True, color_continuous_scale='Blues',
-            template='plotly_dark',
-            title='Confusion Matrix (Test Set)',
-            labels=dict(x='Predicted', y='Actual'),
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        st.download_button(
+            label="⬇️ Download Cleaned Dataset (CSV)",
+            data=csv_clean,
+            file_name='cleaned_customer_data.csv',
+            mime='text/csv',
         )
-        st.plotly_chart(fig_cm, use_container_width=True)
+    with col_dl2:
+        st.download_button(
+            label="⬇️ Download Customer Segmentation Summary (CSV)",
+            data=csv_summary,
+            file_name='customer_segmentation_summary.csv',
+            mime='text/csv',
+        )
 
-    # Feature importances
-    if ml_importance is not None and not ml_importance.empty:
-        st.subheader("📌 Feature Importances")
-        fig_fi = px.bar(ml_importance.head(10), x='Importance', y='Feature',
-                        orientation='h', template='plotly_dark',
-                        color='Importance', color_continuous_scale='Blues',
-                        title='Top Feature Importances')
-        fig_fi.update_layout(yaxis={'categoryorder': 'total ascending'})
-        st.plotly_chart(fig_fi, use_container_width=True)
-
-    # ── Per-customer prediction ───────────────────────────────────────────────
-    st.markdown("---")
-    st.subheader("🔍 Predict for a Specific Customer")
-    sel_cust = st.selectbox("Select Customer ID", ALL_CUSTOMERS, key='ml_cust')
-
-    result = predict_customer(sel_cust, df, ml_model, ml_scaler, ml_encoders, ml_features)
-    if 'error' in result:
-        st.error(result['error'])
-    elif result:
-        r1, r2, r3 = st.columns(3)
-        prob = result['probability']
-        color = "#00CC96" if prob >= 60 else ("#EF553B" if prob < 40 else "#FFA15A")
-
-        r1.markdown(f"""
-<div style="background:#1F2937; border-radius:12px; padding:20px; text-align:center;">
-  <div style="font-size:0.85rem; color:#9CA3AF;">Purchase Probability</div>
-  <div style="font-size:3rem; font-weight:700; color:{color};">{prob}%</div>
-  <div style="font-size:1rem;">{result['label']}</div>
-</div>
-""", unsafe_allow_html=True)
-
-        r2.metric("🛒 Historical Orders", result['frequency'])
-        r2.metric("💰 Total Spending", f"${result['total_spending']:,.2f}")
-        r3.metric("📅 Days Since Last Purchase", result['recency_days'])
-
-        # Probability gauge
-        fig_gauge = go.Figure(go.Indicator(
-            mode='gauge+number',
-            value=prob,
-            domain={'x': [0, 1], 'y': [0, 1]},
-            title={'text': 'Purchase Probability (%)'},
-            gauge={
-                'axis': {'range': [0, 100]},
-                'bar': {'color': color},
-                'steps': [
-                    {'range': [0, 40], 'color': '#374151'},
-                    {'range': [40, 70], 'color': '#1F2937'},
-                    {'range': [70, 100], 'color': '#111827'},
-                ],
-                'threshold': {
-                    'line': {'color': 'white', 'width': 3},
-                    'thickness': 0.75, 'value': 50,
-                },
-            }
-        ))
-        fig_gauge.update_layout(template='plotly_dark', height=300)
-        st.plotly_chart(fig_gauge, use_container_width=True)
+else:
+    st.error("Dataset could not be loaded. Please ensure the file exists at 'data/customer_data.csv'.")
+    st.info("Run: `python src/generate_data.py` to generate the dataset.")
