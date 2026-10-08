@@ -32,7 +32,7 @@ def clean_data(df):
     df_cleaned = df.copy()
     
     # 0. Validate required columns
-    required_cols = ['Customer ID', 'Age', 'Gender', 'Product Category', 'Quantity', 'Price', 'Purchase Date', 'Payment Method']
+    required_cols = ['Customer ID', 'Age', 'Gender', 'Product Category', 'Product Subcategory', 'Quantity', 'Price', 'Purchase Date', 'Payment Method']
     missing_required = [col for col in required_cols if col not in df_cleaned.columns]
     if missing_required:
         print(f"Error: Missing required columns: {missing_required}")
@@ -60,6 +60,8 @@ def clean_data(df):
     # Fill categorical with mode or 'Unknown'
     if 'Product Category' in df_cleaned.columns:
         df_cleaned['Product Category'] = df_cleaned['Product Category'].fillna('Unknown')
+    if 'Product Subcategory' in df_cleaned.columns:
+        df_cleaned['Product Subcategory'] = df_cleaned['Product Subcategory'].fillna('Unknown')
         
     # Fill numerical with median
     if 'Price' in df_cleaned.columns:

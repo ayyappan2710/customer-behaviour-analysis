@@ -52,6 +52,17 @@ def build_rfm(df: pd.DataFrame) -> pd.DataFrame:
                       .rename(columns={'Product Category': 'Preferred_Category'}))
         rfm = rfm.merge(pref_cat, on='Customer ID', how='left')
 
+    # Preferred subcategory
+    if 'Product Subcategory' in df.columns:
+        pref_subcat = (df.groupby(['Customer ID', 'Product Subcategory'])
+                         .size()
+                         .reset_index(name='cnt')
+                         .sort_values('cnt', ascending=False)
+                         .drop_duplicates('Customer ID')
+                         [['Customer ID', 'Product Subcategory']]
+                         .rename(columns={'Product Subcategory': 'Preferred_Subcategory'}))
+        rfm = rfm.merge(pref_subcat, on='Customer ID', how='left')
+
     return rfm
 
 
