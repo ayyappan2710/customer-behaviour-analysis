@@ -80,6 +80,8 @@ def prepare_ml_features(df: pd.DataFrame):
         cat_cols.append('Gender')
     if 'Preferred_Category' in rfm.columns:
         cat_cols.append('Preferred_Category')
+    if 'Preferred_Subcategory' in rfm.columns:
+        cat_cols.append('Preferred_Subcategory')
     if 'Preferred_Payment' in rfm.columns:
         cat_cols.append('Preferred_Payment')
 

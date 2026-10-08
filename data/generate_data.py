@@ -3,13 +3,21 @@ import numpy as np
 import random
 from datetime import datetime, timedelta
 
-def generate_customer_data(num_records=1000):
+def generate_customer_data(num_records=10000):
     np.random.seed(42)
     random.seed(42)
     
-    customer_ids = [f"CUST{str(i).zfill(4)}" for i in range(1, 201)]  # 200 unique customers
+    customer_ids = [f"CUST{str(i).zfill(4)}" for i in range(1, 1001)]  # 1000 unique customers
     genders = ['Male', 'Female', 'Other']
     categories = ['Electronics', 'Clothing', 'Home & Kitchen', 'Beauty', 'Sports', 'Books']
+    subcategories_map = {
+        'Electronics': ['Smartphones', 'Laptops', 'Tablets', 'Audio', 'Accessories'],
+        'Clothing': ['Men', 'Women', 'Kids', 'Activewear', 'Footwear'],
+        'Home & Kitchen': ['Furniture', 'Decor', 'Appliances', 'Cookware', 'Bedding'],
+        'Beauty': ['Skincare', 'Makeup', 'Haircare', 'Fragrance', 'Bath & Body'],
+        'Sports': ['Fitness Equipment', 'Outdoor Gear', 'Athletic Clothing', 'Footwear', 'Accessories'],
+        'Books': ['Personal Development', 'Finance', 'College Books', 'Programming Books', 'Story Books']
+    }
     payment_methods = ['Credit Card', 'Debit Card', 'UPI', 'Cash']
     
     data = []
@@ -56,8 +64,10 @@ def generate_customer_data(num_records=1000):
         
         if pd.notna(category):
             price = round(random.uniform(*price_ranges[category]), 2)
+            subcategory = random.choice(subcategories_map[category])
         else:
             price = round(random.uniform(10, 500), 2)
+            subcategory = np.nan
             
         # 5% chance missing price
         if random.random() < 0.05:
@@ -71,6 +81,7 @@ def generate_customer_data(num_records=1000):
             'Age': age,
             'Gender': gender,
             'Product Category': category,
+            'Product Subcategory': subcategory,
             'Quantity': quantity,
             'Price': price,
             'Purchase Date': date.strftime('%Y-%m-%d %H:%M:%S'),
@@ -92,4 +103,4 @@ def generate_customer_data(num_records=1000):
     print(f"Dataset with {len(df)} records generated successfully.")
 
 if __name__ == '__main__':
-    generate_customer_data(1500)
+    generate_customer_data(10000)

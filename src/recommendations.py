@@ -100,7 +100,7 @@ def personalised_recommendations(
     if cust_df.empty:
         return pd.DataFrame(columns=['Category', 'Score', 'Reason'])
 
-    cust_cat_freq = (cust_df.groupby('Product Category')
+    cust_cat_freq = (cust_df.groupby('Product Subcategory')
                              .size()
                              .rename('Own_Freq'))
 
@@ -115,18 +115,18 @@ def personalised_recommendations(
                 customer_summary['Customer Segment'] == segment
             ]['Customer ID'].tolist()
             seg_df = df[df['Customer ID'].isin(seg_customers)]
-            seg_popularity = (seg_df.groupby('Product Category')
+            seg_popularity = (seg_df.groupby('Product Subcategory')
                                      .size()
                                      .rename('Seg_Freq'))
 
     # ── Global category revenue rank ──
-    global_revenue = df.groupby('Product Category')['Total Amount'].sum()
+    global_revenue = df.groupby('Product Subcategory')['Total Amount'].sum()
     global_rev_norm = (global_revenue / global_revenue.max()).rename('Global_Rev_Norm')
 
     # ── Combine all categories present in the dataset ──
-    all_cats = df['Product Category'].unique()
+    all_cats = df['Product Subcategory'].unique()
     score_df = pd.DataFrame(index=all_cats)
-    score_df.index.name = 'Category'
+    score_df.index.name = 'Subcategory'
 
     score_df['Own_Freq'] = cust_cat_freq.reindex(score_df.index).fillna(0)
     score_df['Seg_Freq'] = seg_popularity.reindex(score_df.index).fillna(0)
@@ -165,10 +165,10 @@ def personalised_recommendations(
             parts.append(f"customer purchased this {int(row['Own_Freq'])}× personally")
         if row['Seg_Freq'] > 0 and segment:
             parts.append(f"popular in '{segment}' segment")
-        rev_rank = global_revenue.rank(ascending=False)[row['Category']]
+        rev_rank = global_revenue.rank(ascending=False)[row['Subcategory']]
         parts.append(f"global revenue rank #{int(rev_rank)}")
         return '; '.join(parts).capitalize() + '.'
 
     score_df['Reason'] = score_df.apply(build_reason, axis=1)
 
-    return score_df[['Category', 'Score', 'Reason']].head(top_n).reset_index(drop=True)
+    return score_df[['Subcategory', 'Score', 'Reason']].head(top_n).rename(columns={'Subcategory': 'Category'}).reset_index(drop=True)
